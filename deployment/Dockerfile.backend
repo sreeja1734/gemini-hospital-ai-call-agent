@@ -1,0 +1,32 @@
+# Build backend and serve via Uvicorn
+# Uses multi-stage build for minimal size
+
+FROM python:3.11-slim as backend
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend ./backend
+COPY ai ./ai
+COPY database ./database
+
+# Create non-root user
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Start FastAPI server
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
