@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     EXOTEL_PHONE_NUMBER: str = ""
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///local_hospital.db"
-    DATABASE_URL_SYNC: str = "sqlite:///local_hospital.db"
+    DATABASE_URL: str = ""
+    DATABASE_URL_SYNC: str = ""
 
     # Hospital / Phone Config
     HOSPITAL_NAME: str = "ABC Hospital"

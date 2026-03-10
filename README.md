@@ -2,7 +2,7 @@
 
 A production-ready AI voice agent designed to automatically answer hospital phone calls, understand patient requests, book appointments, detect medical emergencies, and store comprehensive call analytics.
 
-Built for a 48-hour hackathon, this system leverages Google's **Gemini Live API** and Google Cloud AI services for real-time, multilingual, human-like voice conversations.
+Built for a 48-hour hackathon, this system leverages Google's **Gemini APIs** and Google Cloud AI services for real-time, multilingual, human-like voice conversations, with **Vapi AI** handling phone calls, speech recognition, and text-to-speech.
 
 ![Hospital AI Banner](https://placehold.co/1200x400/134e4a/ffffff?text=Gemini+Hospital+AI+Call+Agent)
 
@@ -21,7 +21,7 @@ Built for a 48-hour hackathon, this system leverages Google's **Gemini Live API*
 
 ### Backend
 - **Framework**: FastAPI (Python 3.11)
-- **Voice Gateway**: Exotel WebSockets for streaming bidirectional audio
+- **Voice Gateway**: Vapi AI (phone numbers, STT, TTS, dynamic call transfers)
 - **Database**: PostgreSQL with SQLAlchemy ORM + asyncpg
 
 ### Google AI Services
@@ -43,14 +43,19 @@ Built for a 48-hour hackathon, this system leverages Google's **Gemini Live API*
 - Node.js 20+
 - PostgreSQL container (or local instance)
 - Google Cloud Project with API keys enabled
-- Exotel Account (for actual phone numbers, optional for local testing)
+- Vapi AI account (for phone numbers and call routing)
 
 ### 2. Environment Variables
 Copy `.env.example` to `.env` in the root folder and add your credentials:
 ```bash
 cp .env.example .env
 ```
-Fill in your `GOOGLE_API_KEY` and `GOOGLE_CLOUD_PROJECT`.
+At minimum, set:
+- `GOOGLE_API_KEY` / `GEMINI_API_KEY` – for Gemini models  
+- `DATABASE_URL` – for PostgreSQL  
+- `DOCTOR_PHONE_NUMBER` – Vapi transfer destination for talking to a doctor  
+- `EMERGENCY_PHONE_NUMBER` – Vapi transfer destination for emergencies  
+- `VAPI_API_KEY` – for authenticated calls to Vapi APIs (optional for Custom LLM)
 
 ### 3. Run with Docker Compose (Recommended)
 You can launch the entire stack (PostgreSQL + FastAPI + Next.js) using Docker:
@@ -121,7 +126,9 @@ gcloud run deploy hospital-ai-frontend \
 
 ## 📞 Testing the Call Flow Locally
 
-If you don't have Exotel set up, you can simulate a conversation via the REST API:
+You can test both the **REST conversation API** and the **Vapi phone flow**.
+
+### A. Using the REST Conversation API (no phone required)
 
 **1. Start a Conversation:**
 ```bash
@@ -151,11 +158,36 @@ curl -X POST http://localhost:8000/end-call \
 ```
 *(This triggers Gemini 1.5 Flash to automatically analyze the transcript and tag it for the dashboard.)*
 
+### B. Testing the Vapi Phone Integration
+
+1. **Run the backend locally**:
+   ```bash
+   uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+2. **Expose it via ngrok (or similar)**:
+   ```bash
+   ngrok http 8000
+   ```
+   Note the HTTPS URL, e.g. `https://abc123.ngrok.io`.
+3. **Configure a Custom LLM in Vapi**:
+   - Base URL: `https://abc123.ngrok.io/vapi`
+   - Path: `/chat/completions`
+4. **Create a Vapi assistant**:
+   - Use the Custom LLM from step 3 as the model.
+   - First message: `Hello, thank you for calling our healthcare center. How can I help you today?`
+   - Add a `transfer_to_number` tool so the model can trigger call transfers.
+5. **Attach a phone number in Vapi** to this assistant and call it from your phone.
+
+On each turn, Vapi will:
+- Stream audio from the caller  
+- Transcribe it and send the transcript to `/vapi/chat/completions`  
+- Use the Gemini-powered receptionist logic to decide whether to answer, book an appointment, or transfer the call to `DOCTOR_PHONE_NUMBER` / `EMERGENCY_PHONE_NUMBER`.
+
 ---
 
 ## 📜 Hackathon Judging Criteria
 
-- **Innovation**: Uses Gemini Live API + multi-turn conversational function calling.
+- **Innovation**: Uses Gemini APIs + multi-turn conversational function calling.
 - **Completeness**: A fully functional End-to-End system (DB + Backend + Frontend).
 - **Practicality**: Solves a real-world high-value problem (Hospital triage & scheduling).
 - **Scalability**: Stateless backend design, containerized, and deployment-ready for Cloud Run.
