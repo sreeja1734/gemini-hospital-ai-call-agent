@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # Google AI
+    # Google / Gemini
     GOOGLE_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""  # Optional alias; if set, use for new integrations
     GOOGLE_CLOUD_PROJECT: str = ""
     GOOGLE_CLOUD_REGION: str = "us-central1"
     GEMINI_MODEL: str = "gemini-2.0-flash"
@@ -31,10 +32,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///local_hospital.db"
     DATABASE_URL_SYNC: str = "sqlite:///local_hospital.db"
 
-    # Hospital Config
+    # Hospital / Phone Config
     HOSPITAL_NAME: str = "ABC Hospital"
     HOSPITAL_PHONE: str = "+1-800-ABC-HOSP"
     RECEPTIONIST_PHONE: str = "+1-800-ABC-RECV"
+    DOCTOR_PHONE_NUMBER: str = ""      # Destination for non-emergency doctor transfers
+    EMERGENCY_PHONE_NUMBER: str = ""   # Destination for emergency transfers (e.g. 911 or local ER)
+
+    # Vapi
+    VAPI_API_KEY: str = ""
 
     # Security
     SECRET_KEY: str = "change-me-in-production-use-a-long-random-string"

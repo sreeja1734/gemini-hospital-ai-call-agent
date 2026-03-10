@@ -13,6 +13,7 @@ from database.connection import init_db
 from .routes.calls import router as calls_router
 from .routes.appointments import router as appointments_router
 from .routes.dashboard import router as dashboard_router
+from .routes.vapi import router as vapi_router
 from ai.conversation_manager import conversation_manager
 
 logger = structlog.get_logger()
@@ -69,6 +70,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(calls_router)
 app.include_router(appointments_router)
 app.include_router(dashboard_router)
+app.include_router(vapi_router, prefix="/vapi")
 
 
 # ── Health & status endpoints
