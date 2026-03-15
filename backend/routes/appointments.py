@@ -14,9 +14,8 @@ from database.models import Appointment
 from ..services.appointment_service import (
     check_doctor_availability, book_appointment, get_all_appointments
 )
-from ..auth import get_current_user, UserInfo
 
-router = APIRouter(prefix="/appointments", tags=["Appointments"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/appointments", tags=["Appointments"])
 logger = structlog.get_logger()
 
 
