@@ -149,9 +149,11 @@ class MockSpeechToTextService:
 def get_stt_service():
     """Factory: returns real or mock STT service based on config."""
     if settings.GOOGLE_CLOUD_PROJECT:
-        return SpeechToTextService()
-    logger.warning("GOOGLE_CLOUD_PROJECT not set — using MockSTT")
+        try:
+            return SpeechToTextService()
+        except Exception as e:
+            logger.warning("Failed to init real STT, falling back to mock", error=str(e))
     return MockSpeechToTextService()
 
 
-stt_service = MockSpeechToTextService()  # Using mock service to avoid credential issues
+stt_service = get_stt_service()

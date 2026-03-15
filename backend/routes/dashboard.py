@@ -3,15 +3,16 @@ Dashboard analytics routes.
 Provides aggregated call, appointment, and emergency data for the admin UI.
 """
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from datetime import datetime, timedelta
 
 from database.connection import get_db
 from database.models import Call, Appointment, Transcript, Patient, CallStatus, RiskLevel
+from ..auth import get_current_user, UserInfo
 
-router = APIRouter(prefix="", tags=["Dashboard"])
+router = APIRouter(prefix="", tags=["Dashboard"], dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 
 
@@ -241,3 +242,28 @@ def _demo_dashboard_data() -> dict:
         "generated_at": now.isoformat(),
         "demo_mode": True
     }
+
+
+@router.get("/dashboard/stream")
+async def dashboard_sse(request: Request, db: AsyncSession = Depends(get_db)):
+    """Server-Sent Events stream for real-time dashboard updates."""
+    import asyncio
+    import json as _json
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                data = await get_dashboard_data(db)
+                yield f"data: {_json.dumps(data)}\n\n"
+            except Exception:
+                yield f"data: {_json.dumps({'error': 'refresh failed'})}\n\n"
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )

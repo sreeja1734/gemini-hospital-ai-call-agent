@@ -1,0 +1,87 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  lint-and-test-backend:
+    name: Backend — Lint & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemini-hospital-ai-call-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install ruff
+
+      - name: Lint with ruff
+        run: ruff check backend/ ai/ database/ tests/
+
+      - name: Run tests
+        env:
+          GOOGLE_API_KEY: "test-key"
+          DATABASE_URL: "sqlite+aiosqlite:///test.db"
+          SECRET_KEY: "test-secret"
+          DEBUG: "true"
+        run: pytest tests/ -v --tb=short
+
+  lint-frontend:
+    name: Frontend — Lint & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemini-hospital-ai-call-agent/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: gemini-hospital-ai-call-agent/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Build
+        run: npm run build
+
+  docker-build:
+    name: Docker — Build Images
+    runs-on: ubuntu-latest
+    needs: [lint-and-test-backend, lint-frontend]
+    if: github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: gemini-hospital-ai-call-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -f deployment/Dockerfile.backend -t hospital-ai-backend .
+
+      - name: Build frontend image
+        run: docker build -f deployment/Dockerfile.frontend -t hospital-ai-frontend .

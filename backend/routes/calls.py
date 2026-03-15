@@ -1,12 +1,12 @@
 """
 FastAPI routes for call handling and Gemini AI conversation.
-Handles: Twilio webhooks, WebSocket streaming, speech processing.
+Handles: Exotel webhooks, WebSocket streaming, speech processing.
 """
 import json
 import uuid
 import base64
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -53,9 +53,10 @@ class EndCallRequest(BaseModel):
 
 
 # ── Gemini function call handler
-async def handle_function_call(fn_name: str, fn_args: dict, session) -> dict:
+async def handle_function_call(fn_name: str, fn_args: dict, call_id: str) -> dict:
     """Dispatch Gemini function calls to backend services."""
     logger.info("Handling function call", function=fn_name)
+    ctx = conversation_manager.get_session(call_id)
 
     if fn_name == "checkDoctorAvailability":
         return await check_doctor_availability(
@@ -69,10 +70,10 @@ async def handle_function_call(fn_name: str, fn_args: dict, session) -> dict:
             patient_name=fn_args.get("patient_name", "Patient"),
             doctor_name=fn_args.get("doctor_name"),
             appointment_slot=fn_args.get("appointment_slot"),
-            patient_phone=session.caller_phone,
+            patient_phone=ctx.caller_phone if ctx else "Unknown",
             department=fn_args.get("department", "General Medicine"),
             notes=fn_args.get("notes", ""),
-            call_id=session.call_id
+            call_id=call_id
         )
         return result
 
@@ -82,16 +83,13 @@ async def handle_function_call(fn_name: str, fn_args: dict, session) -> dict:
     elif fn_name == "detectEmergency":
         result = await assess_emergency_with_ai(
             symptoms=fn_args.get("symptoms", ""),
-            caller_phone=session.caller_phone
+            caller_phone=ctx.caller_phone if ctx else ""
         )
         if result.get("is_emergency"):
-            ctx = conversation_manager.get_session(session.call_id)
-            if ctx:
-                conversation_manager.set_emergency(session.call_id, result["risk_level"])
+            conversation_manager.set_emergency(call_id, result["risk_level"])
         return result
 
     elif fn_name == "escalateToHuman":
-        ctx = conversation_manager.get_session(session.call_id)
         if ctx:
             ctx.ai_handled = False
         return {
@@ -144,17 +142,15 @@ async def incoming_call(request: Request, db: AsyncSession = Depends(get_db)):
     """
     form_data = await request.form()
     caller_phone = form_data.get("From", "Unknown")
-    # Exotel CallSid
     exotel_sid = form_data.get("CallSid", str(uuid.uuid4()))
 
-    # Create conversation session
+    # Create conversation session (single source of truth)
     ctx = conversation_manager.create_session(caller_phone)
-    gemini_session = gemini_agent.create_session(caller_phone)
 
     # Store call in DB
     call = Call(
         id=uuid.UUID(ctx.call_id),
-        twilio_call_sid=exotel_sid,  # Sticking to the DB column name for the third-party SID
+        twilio_call_sid=exotel_sid,
         caller_phone=caller_phone,
         status=CallStatus.ACTIVE
     )
@@ -164,10 +160,8 @@ async def incoming_call(request: Request, db: AsyncSession = Depends(get_db)):
     logger.info("Incoming call", phone=caller_phone, call_id=ctx.call_id)
 
     # Return Exotel XML to stream audio to our WebSocket
-    # Note: Replace 'your-domain.com' with the actual ngrok/production domain
-    ws_url = f"wss://your-domain.com/ws/call/{ctx.call_id}"
-    
-    # Exotel uses standard XML for WebSockets
+    ws_url = f"{settings.WS_BASE_URL}/ws/call/{ctx.call_id}"
+
     exotel_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -187,14 +181,12 @@ async def start_conversation(
 ):
     """
     Initialize a new call session and return the greeting.
-    Use this for testing or non-Twilio call initiation.
+    Use this for testing or non-Exotel call initiation.
     """
     ctx = conversation_manager.create_session(req.caller_phone)
     ctx.language = req.language
 
-    gemini_session = gemini_agent.create_session(req.caller_phone)
-    greeting = await gemini_agent.get_greeting(gemini_session)
-
+    greeting = gemini_agent.get_greeting()
     conversation_manager.add_assistant_turn(ctx.call_id, greeting)
 
     # Synthesize greeting audio
@@ -225,8 +217,6 @@ async def process_user_speech(
     if not ctx:
         raise HTTPException(status_code=404, detail="Call session not found")
 
-    gemini_session = gemini_agent.get_session(req.call_id)
-
     # Step 1: Speech to Text
     if req.audio_base64:
         audio_bytes = base64.b64decode(req.audio_base64)
@@ -248,12 +238,12 @@ async def process_user_speech(
         conversation_manager.set_emergency(req.call_id, "high")
 
     # Step 3: Gemini generates response (with function calling)
-    if not gemini_session:
-        gemini_session = gemini_agent.create_session(ctx.caller_phone)
-
+    history = conversation_manager.get_gemini_history(req.call_id)
     response_text, fn_calls = await gemini_agent.process_message(
-        gemini_session, user_text,
-        function_handler=lambda fn, args, sess: handle_function_call(fn, args, ctx)
+        call_id=req.call_id,
+        user_message=user_text,
+        history=history[:-1],  # exclude the just-added user turn (Gemini sends it separately)
+        function_handler=lambda fn, args: handle_function_call(fn, args, req.call_id),
     )
 
     conversation_manager.add_assistant_turn(req.call_id, response_text, fn_calls)
@@ -295,7 +285,7 @@ async def end_call(req: EndCallRequest, db: AsyncSession = Depends(get_db)):
         call.risk_level = RiskLevel(ctx.risk_level)
         call.ai_handled = ctx.ai_handled
         call.duration_seconds = ctx.duration_seconds
-        call.ended_at = datetime.utcnow()
+        call.ended_at = datetime.now(timezone.utc)
         if ctx.detected_intent:
             try:
                 call.intent = Intent(ctx.detected_intent)
@@ -316,7 +306,7 @@ async def end_call(req: EndCallRequest, db: AsyncSession = Depends(get_db)):
             )
             db.add(transcript)
 
-    # Async analysis (fire and forget)
+    # Trigger analysis
     analysis = await analyze_transcript(req.call_id, transcript_text)
     if call and analysis:
         result = await db.execute(
@@ -389,12 +379,16 @@ async def websocket_call_stream(websocket: WebSocket, call_id: str):
 
                         # Get Gemini response
                         ctx = conversation_manager.get_session(call_id)
-                        gemini_session = gemini_agent.get_session(call_id)
-                        if ctx and gemini_session:
+                        if ctx:
+                            history = conversation_manager.get_gemini_history(call_id)
                             response_text, _ = await gemini_agent.process_message(
-                                gemini_session, text,
-                                function_handler=lambda fn, args, sess: handle_function_call(fn, args, ctx)
+                                call_id=call_id,
+                                user_message=text,
+                                history=history[:-1],
+                                function_handler=lambda fn, args: handle_function_call(fn, args, call_id),
                             )
+                            conversation_manager.add_assistant_turn(call_id, response_text)
+
                             # Synthesize and send back
                             audio_out = await tts_service.synthesize(response_text, ctx.language)
                             if audio_out:

@@ -4,9 +4,12 @@ Main entry point: registers all routers, middleware, startup/shutdown hooks.
 """
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from database.connection import init_db
@@ -14,6 +17,8 @@ from .routes.calls import router as calls_router
 from .routes.appointments import router as appointments_router
 from .routes.dashboard import router as dashboard_router
 from .routes.vapi import router as vapi_router
+from .routes.auth import router as auth_router
+from .auth import get_current_user
 from ai.conversation_manager import conversation_manager
 
 logger = structlog.get_logger()
@@ -46,10 +51,15 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# ── Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ── CORS middleware (allow dashboard frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.run.app", "*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,6 +77,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ── Routers
+app.include_router(auth_router)
 app.include_router(calls_router)
 app.include_router(appointments_router)
 app.include_router(dashboard_router)
@@ -76,12 +87,24 @@ app.include_router(vapi_router, prefix="/vapi")
 # ── Health & status endpoints
 @app.get("/health", tags=["System"])
 async def health_check():
-    """Health check for Cloud Run liveness probe."""
+    """Health check for Cloud Run liveness probe. Verifies DB connectivity."""
+    db_ok = False
+    try:
+        from database.connection import async_engine
+        from sqlalchemy import text
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        pass
+
+    status = "healthy" if db_ok else "degraded"
     return {
-        "status": "healthy",
+        "status": status,
         "service": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "active_calls": conversation_manager.active_count()
+        "active_calls": conversation_manager.active_count(),
+        "database": "connected" if db_ok else "unavailable",
     }
 
 

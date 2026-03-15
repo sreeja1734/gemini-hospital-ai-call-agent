@@ -13,11 +13,14 @@ from typing import Any, Dict, List
 
 import google.generativeai as genai
 from fastapi import APIRouter, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..config import settings
 
 router = APIRouter(tags=["Vapi"])
 logger = structlog.get_logger()
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _get_gemini_client() -> genai.GenerativeModel:
@@ -87,7 +90,7 @@ Based on the conversation, decide the next thing the receptionist should say.
 Return ONLY the JSON object as described in the system instructions.
 """.strip()
 
-    response = model.generate_content(prompt)
+    response = await model.generate_content_async(prompt)
     raw = (response.text or "").strip()
 
     try:
@@ -107,6 +110,7 @@ Return ONLY the JSON object as described in the system instructions.
 
 
 @router.post("/chat/completions")
+@limiter.limit("60/minute")
 async def vapi_chat_completions(request: Request) -> Dict[str, Any]:
     """
     OpenAI-compatible chat completions endpoint for Vapi Custom LLM.

@@ -185,6 +185,15 @@ On each turn, Vapi will:
 
 ---
 
+## 🛠️ Troubleshooting & Recent Fixes
+
+If you encounter issues during `uvicorn` startup, ensure you have the latest code which patches the following known bugs:
+- **`NameError` for `Request`**: Ensure `fastapi` imports include `Request` inside `backend/routes/dashboard.py`.
+- **Auth Router Relative imports**: The references to local configuration (`.auth` and `.config`) were changed to parent directories (`..auth` and `..config`) in `backend/routes/auth.py` to prevent import errors.
+- **Passlib/Bcrypt 72-byte ValueError**: The application pins `bcrypt==3.2.2` in `requirements.txt`. Newer versions of `bcrypt` (>4.0.0) cause a wrap-bug detection crash within `passlib`. If this happens, run `pip install bcrypt==3.2.2`.
+
+---
+
 ## 📜 Hackathon Judging Criteria
 
 - **Innovation**: Uses Gemini APIs + multi-turn conversational function calling.

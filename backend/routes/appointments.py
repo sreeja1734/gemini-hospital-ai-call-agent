@@ -14,8 +14,9 @@ from database.models import Appointment
 from ..services.appointment_service import (
     check_doctor_availability, book_appointment, get_all_appointments
 )
+from ..auth import get_current_user, UserInfo
 
-router = APIRouter(prefix="/appointments", tags=["Appointments"])
+router = APIRouter(prefix="/appointments", tags=["Appointments"], dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 
 
@@ -93,4 +94,67 @@ async def get_appointment(appointment_id: str, db: AsyncSession = Depends(get_db
         "confirmed": appt.confirmed,
         "notes": appt.notes,
         "created_at": appt.created_at.isoformat() if appt.created_at else None
+    }
+
+
+class RescheduleRequest(BaseModel):
+    new_slot: str  # ISO 8601 datetime string
+    notes: Optional[str] = None
+
+
+@router.patch("/{appointment_id}")
+async def reschedule_appointment(
+    appointment_id: str,
+    req: RescheduleRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reschedule an existing appointment to a new time slot."""
+    import uuid as _uuid
+    from datetime import datetime as _dt
+
+    result = await db.execute(
+        select(Appointment).where(Appointment.id == _uuid.UUID(appointment_id))
+    )
+    appt = result.scalar_one_or_none()
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    try:
+        new_slot = _dt.fromisoformat(req.new_slot)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid datetime format")
+
+    appt.appointment_slot = new_slot
+    if req.notes:
+        appt.notes = (appt.notes or "") + f"\nRescheduled: {req.notes}"
+    await db.flush()
+
+    return {
+        "id": str(appt.id),
+        "new_slot": new_slot.isoformat(),
+        "message": f"Appointment rescheduled to {new_slot.strftime('%A, %B %d at %I:%M %p')}"
+    }
+
+
+@router.delete("/{appointment_id}")
+async def cancel_appointment(
+    appointment_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Cancel (delete) an existing appointment."""
+    import uuid as _uuid
+
+    result = await db.execute(
+        select(Appointment).where(Appointment.id == _uuid.UUID(appointment_id))
+    )
+    appt = result.scalar_one_or_none()
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    await db.delete(appt)
+    await db.flush()
+
+    return {
+        "id": appointment_id,
+        "message": "Appointment cancelled successfully"
     }

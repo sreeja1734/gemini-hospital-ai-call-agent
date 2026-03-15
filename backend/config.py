@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production-use-a-long-random-string"
     API_KEY_HEADER: str = "X-API-Key"
 
+    # WebSocket / Networking
+    WS_BASE_URL: str = "wss://localhost:8000"
+    ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://localhost:3001"]
+
     # Supported Languages
     SUPPORTED_LANGUAGES: list = ["en-US", "hi-IN", "ta-IN"]
 

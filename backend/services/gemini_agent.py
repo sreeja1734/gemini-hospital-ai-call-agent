@@ -124,26 +124,13 @@ HOSPITAL_TOOLS = [
 ]
 
 
-class ConversationSession:
-    """Manages state for a single call conversation."""
-
-    def __init__(self, call_id: str, caller_phone: str):
-        self.call_id = call_id
-        self.caller_phone = caller_phone
-        self.history: list[dict] = []
-        self.patient_name: Optional[str] = None
-        self.detected_intent: Optional[str] = None
-        self.is_emergency: bool = False
-        self.language: str = "en-US"
-        self.turn_count: int = 0
-        self.pending_appointment: Optional[dict] = None
-        self.started_at = datetime.utcnow()
-
-
 class GeminiAgent:
     """
     Hospital AI Agent powered by Google Gemini.
     Handles multi-turn conversations with function calling.
+
+    NOTE: Session state is managed externally by ConversationManager.
+    This class is stateless — it only wraps Gemini model interactions.
     """
 
     def __init__(self):
@@ -156,56 +143,36 @@ class GeminiAgent:
                 hospital_phone=settings.HOSPITAL_PHONE
             )
         )
-        self._sessions: dict[str, ConversationSession] = {}
         logger.info("GeminiAgent initialized", model=settings.GEMINI_MODEL)
 
-    def create_session(self, caller_phone: str) -> ConversationSession:
-        """Create a new conversation session for an incoming call."""
-        call_id = str(uuid.uuid4())
-        session = ConversationSession(call_id=call_id, caller_phone=caller_phone)
-        self._sessions[call_id] = session
-        logger.info("Session created", call_id=call_id, caller=caller_phone)
-        return session
-
-    def get_session(self, call_id: str) -> Optional[ConversationSession]:
-        """Retrieve an existing session by call ID."""
-        return self._sessions.get(call_id)
-
-    def end_session(self, call_id: str) -> Optional[ConversationSession]:
-        """End and remove a session, returning it for persistence."""
-        return self._sessions.pop(call_id, None)
-
-    async def get_greeting(self, session: ConversationSession) -> str:
-        """Generate the initial greeting for a new call."""
-        greeting = (
+    def get_greeting(self) -> str:
+        """Return the initial greeting for a new call."""
+        return (
             f"Hello! Thank you for calling {settings.HOSPITAL_NAME}. "
             "I'm your AI assistant. How may I help you today?"
         )
-        session.history.append({"role": "model", "parts": [greeting]})
-        return greeting
 
     async def process_message(
         self,
-        session: ConversationSession,
+        call_id: str,
         user_message: str,
-        function_handler=None
+        history: list[dict],
+        function_handler=None,
     ) -> tuple[str, list[dict]]:
         """
         Process a user message and return (response_text, function_calls).
 
         Args:
-            session: Active conversation session
+            call_id: ID of the current call (for logging)
             user_message: Transcribed user speech
+            history: List of {role, parts} dicts from ConversationManager
             function_handler: Async callable to handle function calls
 
         Returns:
             Tuple of (text_response, list_of_function_calls_made)
         """
-        session.history.append({"role": "user", "parts": [user_message]})
-        session.turn_count += 1
-
         try:
-            chat = self.model.start_chat(history=session.history[:-1])
+            chat = self.model.start_chat(history=history)
             response = chat.send_message(user_message)
 
             function_calls_made = []
@@ -226,7 +193,7 @@ class GeminiAgent:
 
                     # Execute function handler if provided
                     if function_handler:
-                        fn_result = await function_handler(fn_name, fn_args, session)
+                        fn_result = await function_handler(fn_name, fn_args)
 
                         # Send function result back to Gemini
                         tool_response = chat.send_message(
@@ -242,14 +209,10 @@ class GeminiAgent:
                         if tool_response.text:
                             final_text += tool_response.text
 
-            # Update session history with model response
-            if final_text:
-                session.history.append({"role": "model", "parts": [final_text]})
-
             return final_text or "I'm sorry, I didn't quite get that. Could you please repeat?", function_calls_made
 
         except Exception as e:
-            logger.error("Gemini processing error", error=str(e), call_id=session.call_id)
+            logger.error("Gemini processing error", error=str(e), call_id=call_id)
             fallback = "I'm experiencing a technical issue. Please hold while I connect you to our staff."
             return fallback, []
 

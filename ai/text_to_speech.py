@@ -130,9 +130,11 @@ class MockTextToSpeechService:
 def get_tts_service():
     """Factory: returns real or mock TTS service."""
     if settings.GOOGLE_CLOUD_PROJECT:
-        return TextToSpeechService()
-    logger.warning("GOOGLE_CLOUD_PROJECT not set — using MockTTS")
+        try:
+            return TextToSpeechService()
+        except Exception as e:
+            logger.warning("Failed to init real TTS, falling back to mock", error=str(e))
     return MockTextToSpeechService()
 
 
-tts_service = MockTextToSpeechService()  # Using mock service to avoid credential issues
+tts_service = get_tts_service()

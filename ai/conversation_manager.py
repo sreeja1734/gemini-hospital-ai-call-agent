@@ -34,6 +34,7 @@ class CallContext:
     risk_level: str = "low"
     ai_handled: bool = True
     turns: list[Turn] = field(default_factory=list)
+    gemini_history: list[dict] = field(default_factory=list)  # Gemini-compatible history
     pending_appointment: Optional[dict] = None
     started_at: datetime = field(default_factory=datetime.utcnow)
     ended_at: Optional[datetime] = None
@@ -82,6 +83,7 @@ class ConversationManager:
         ctx = self._sessions.get(call_id)
         if ctx:
             ctx.turns.append(Turn(role="user", text=text))
+            ctx.gemini_history.append({"role": "user", "parts": [text]})
 
     def add_assistant_turn(
         self, call_id: str, text: str, function_calls: list = None
@@ -89,6 +91,12 @@ class ConversationManager:
         ctx = self._sessions.get(call_id)
         if ctx:
             ctx.turns.append(Turn(role="assistant", text=text, function_calls=function_calls or []))
+            ctx.gemini_history.append({"role": "model", "parts": [text]})
+
+    def get_gemini_history(self, call_id: str) -> list[dict]:
+        """Return the Gemini-compatible conversation history."""
+        ctx = self._sessions.get(call_id)
+        return ctx.gemini_history if ctx else []
 
     def update_intent(self, call_id: str, intent: str) -> None:
         ctx = self._sessions.get(call_id)
