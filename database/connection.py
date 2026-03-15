@@ -10,6 +10,7 @@ import structlog
 from backend.config import settings
 from database.models import Base
 
+
 logger = structlog.get_logger()
 
 # Async engine for FastAPI endpoints

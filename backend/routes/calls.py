@@ -190,8 +190,11 @@ async def start_conversation(
     conversation_manager.add_assistant_turn(ctx.call_id, greeting)
 
     # Synthesize greeting audio
-    audio_bytes = await tts_service.synthesize(greeting, req.language)
-    audio_b64 = base64.b64encode(audio_bytes).decode() if audio_bytes else ""
+    try:
+        audio_bytes = await tts_service.synthesize(greeting, req.language)
+        audio_b64 = base64.b64encode(audio_bytes).decode() if audio_bytes else ""
+    except Exception:
+        audio_b64 = ""
 
     return {
         "call_id": ctx.call_id,
