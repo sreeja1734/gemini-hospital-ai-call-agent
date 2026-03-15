@@ -369,6 +369,28 @@ async def websocket_call_stream(websocket: WebSocket, call_id: str):
             if event_type == "start":
                 logger.info("Exotel stream started", call_id=call_id)
 
+                # Automatically greet the caller at the start of the call
+                ctx = conversation_manager.get_session(call_id)
+                if ctx:
+                    greeting = gemini_agent.get_greeting()
+                    conversation_manager.add_assistant_turn(call_id, greeting)
+
+                    # Synthesize greeting audio and send it back over the stream
+                    try:
+                        audio_out = await tts_service.synthesize(greeting, ctx.language)
+                    except Exception:
+                        audio_out = b""
+
+                    if audio_out:
+                        await websocket.send_json(
+                            {
+                                "event": "media",
+                                "media": {
+                                    "payload": base64.b64encode(audio_out).decode()
+                                },
+                            }
+                        )
+
             elif event_type == "media":
                 # Receive audio chunk from Exotel
                 audio_payload = data.get("media", {}).get("payload", "")

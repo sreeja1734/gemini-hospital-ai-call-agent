@@ -148,8 +148,8 @@ class GeminiAgent:
     def get_greeting(self) -> str:
         """Return the initial greeting for a new call."""
         return (
-            f"Hello! Thank you for calling {settings.HOSPITAL_NAME}. "
-            "I'm your AI assistant. How may I help you today?"
+            f"Hello, thank you for calling {settings.HOSPITAL_NAME}. "
+            "How may I assist you today?"
         )
 
     async def process_message(
