@@ -21,6 +21,11 @@ from .routes.auth import router as auth_router
 from .auth import get_current_user
 from ai.conversation_manager import conversation_manager
 
+try:
+    from agent.hospital_agent import hospital_receptionist_agent
+except ImportError:
+    hospital_receptionist_agent = None
+
 logger = structlog.get_logger()
 
 
@@ -29,6 +34,11 @@ async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
     # Startup
     logger.info("Starting Gemini Hospital AI Call Agent", version=settings.APP_VERSION)
+    if hospital_receptionist_agent:
+        logger.info("Hospital Receptionist Agent loaded successfully", agent_name=hospital_receptionist_agent.name)
+    else:
+        logger.warning("Hospital Receptionist Agent could not be loaded")
+        
     await init_db()
     logger.info("Database initialized")
     yield
