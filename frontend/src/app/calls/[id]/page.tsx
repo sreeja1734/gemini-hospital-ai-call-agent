@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
-import { ArrowLeft, Phone, Clock, Shield, User, MessageSquare } from "lucide-react";
+import { getTranscripts } from "@/lib/api";
+import { ArrowLeft, Phone, Clock, Shield, MessageSquare } from "lucide-react";
 
 interface CallDetail {
     call_id: string;
@@ -20,11 +21,11 @@ interface CallDetail {
 export default function CallDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const { loading: authLoading, getAuthHeaders } = useAuth();
+    const { loading: authLoading } = useAuth();
     const [call, setCall] = useState<CallDetail | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const callId = params.id as string;
 
     useEffect(() => {
@@ -32,38 +33,42 @@ export default function CallDetailPage() {
 
         async function fetchCall() {
             try {
-                // Fetch transcript with analysis
-                const res = await fetch(`${API_URL}/transcripts?limit=50`, {
-                    headers: getAuthHeaders(),
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    const match = data.transcripts?.find(
-                        (t: any) => t.call_id === callId
-                    );
-                    if (match) {
-                        setCall({
-                            call_id: match.call_id,
-                            phone: match.phone || "Unknown",
-                            status: match.analysis?.call_outcome || "unknown",
-                            risk_level: match.analysis?.emergency_risk || "low",
-                            ai_handled: true,
-                            duration_seconds: 0,
-                            transcript: match.content_preview,
-                            analysis: match.analysis,
-                            started_at: match.created_at,
-                        });
-                    }
+                const data = await getTranscripts(100);
+                const match = data.transcripts?.find(
+                    (transcript) => transcript.call_id === callId
+                );
+                if (match) {
+                    setCall({
+                        call_id: match.call_id,
+                        phone: match.phone || "Unknown",
+                        status: String(match.analysis?.call_outcome || "unknown"),
+                        risk_level: String(match.analysis?.emergency_risk || "low"),
+                        ai_handled: true,
+                        duration_seconds: 0,
+                        transcript: match.content_preview,
+                        analysis: match.analysis,
+                        started_at: match.created_at,
+                    });
+                    setError("");
+                } else {
+                    setCall(null);
+                    setError("No transcript was found for this call.");
                 }
-            } catch (err) {
-                console.error("Failed to fetch call", err);
+            } catch (caughtError) {
+                console.error("Failed to fetch call", caughtError);
+                const message =
+                    caughtError instanceof Error ? caughtError.message : "Failed to fetch call details.";
+                setError(message);
+                if (message.toLowerCase().includes("401") || message.toLowerCase().includes("not authenticated")) {
+                    router.replace("/login");
+                }
             } finally {
                 setLoading(false);
             }
         }
 
         fetchCall();
-    }, [callId, authLoading]);
+    }, [callId, authLoading, router]);
 
     if (authLoading || loading) {
         return (
@@ -93,7 +98,7 @@ export default function CallDetailPage() {
                 {!call ? (
                     <div className="text-center py-20 text-slate-500">
                         <MessageSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p>Call not found or no transcript available.</p>
+                        <p>{error || "Call not found or no transcript available."}</p>
                     </div>
                 ) : (
                     <>
@@ -175,7 +180,7 @@ export default function CallDetailPage() {
                         {/* Transcript */}
                         {call.transcript && (
                             <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
-                                <h2 className="text-lg font-semibold mb-4">Transcript</h2>
+                                <h2 className="text-lg font-semibold mb-4">Transcript Preview</h2>
                                 <div className="bg-slate-900/50 rounded-lg p-4 font-mono text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
                                     {call.transcript}
                                 </div>

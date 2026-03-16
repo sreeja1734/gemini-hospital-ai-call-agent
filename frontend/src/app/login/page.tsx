@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { login } from "@/lib/api";
 
 export default function LoginPage() {
     const [username, setUsername] = useState("");
@@ -10,26 +11,13 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const router = useRouter();
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
         setLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password }),
-            });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.detail || "Login failed");
-            }
-
-            const data = await res.json();
+            const data = await login(username, password);
             localStorage.setItem("token", data.access_token);
             localStorage.setItem("user", JSON.stringify({
                 username: data.username,
@@ -44,7 +32,7 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900">
+        <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900">
             <div className="w-full max-w-md">
                 {/* Logo / Brand */}
                 <div className="text-center mb-8">

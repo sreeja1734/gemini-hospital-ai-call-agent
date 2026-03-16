@@ -3,28 +3,42 @@
 import { useEffect, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { Calendar, Search, Filter, MoreHorizontal } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { getAppointments, type Appointment } from '@/lib/api';
+import { useAuth } from '@/lib/useAuth';
 
 export default function AppointmentTable() {
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const router = useRouter();
+  const { loading: authLoading } = useAuth();
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     async function fetchAppointments() {
       try {
-        const res = await fetch('/api/appointments?limit=100');
-        if (res.ok) {
-          const data = await res.json();
-          setAppointments(data.appointments || []);
+        const data = await getAppointments(100);
+        setAppointments(data.appointments || []);
+        setError('');
+      } catch (caughtError) {
+        console.error('Failed to fetch appointments:', caughtError);
+        const message =
+          caughtError instanceof Error ? caughtError.message : 'Failed to fetch appointments.';
+        setError(message);
+        if (message.toLowerCase().includes('401') || message.toLowerCase().includes('not authenticated')) {
+          router.replace('/login');
         }
-      } catch (error) {
-        console.error("Failed to fetch appointments:", error);
       } finally {
         setLoading(false);
       }
     }
     fetchAppointments();
-  }, []);
+  }, [authLoading, router]);
 
   const filteredAppointments = appointments.filter(apt => 
     apt.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -73,13 +87,19 @@ export default function AppointmentTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading ? (
+            {authLoading || loading ? (
               <tr>
                 <td colSpan={6} className="px-6 py-8 text-center text-slate-400">
                   <div className="flex items-center justify-center gap-2">
                     <div className="w-4 h-4 rounded-full border-2 border-slate-200 border-t-hospital-500 animate-spin"></div>
                     Loading appointments...
                   </div>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-8 text-center text-rose-500">
+                  {error}
                 </td>
               </tr>
             ) : filteredAppointments.length === 0 ? (

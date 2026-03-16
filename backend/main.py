@@ -21,6 +21,7 @@ from .routes.auth import router as auth_router
 from .routes.calls import router as calls_router
 from .routes.dashboard import router as dashboard_router
 from .routes.vapi import router as vapi_router
+from .routes.voice import router as voice_router
 
 logger = structlog.get_logger()
 
@@ -92,6 +93,7 @@ app.include_router(calls_router)
 app.include_router(appointments_router)
 app.include_router(dashboard_router)
 app.include_router(vapi_router, prefix="/vapi")
+app.include_router(voice_router)
 
 
 @app.get("/health", tags=["System"])

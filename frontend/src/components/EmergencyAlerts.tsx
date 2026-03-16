@@ -25,8 +25,8 @@ export default function EmergencyAlerts({ alerts }: { alerts: any[] }) {
           <ShieldAlert size={20} className="text-rose-600" />
           Emergency Alerts
         </h3>
-        <span className="bg-rose-600 text-white text-xs font-bold px-2 py-1 rounded-full">
-          {alerts.length} Escalarions
+        <span className="inline-flex items-center justify-center whitespace-nowrap bg-rose-600 text-white text-xs font-bold px-3 py-1.5 rounded-full">
+          {alerts.length} Escalations
         </span>
       </div>
       

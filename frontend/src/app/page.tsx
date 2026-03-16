@@ -1,24 +1,39 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { PhoneCall, CalendarCheck, Clock, ShieldAlert } from 'lucide-react';
 import CallStats from '@/components/CallStats';
 import EmergencyAlerts from '@/components/EmergencyAlerts';
+import VoiceCall from '@/components/VoiceCall';
+import { getDashboardData, type DashboardData } from '@/lib/api';
+import { useAuth } from '@/lib/useAuth';
 
 export default function DashboardHome() {
-  const [data, setData] = useState<any>(null);
+  const router = useRouter();
+  const { loading: authLoading } = useAuth();
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     async function fetchDashboardData() {
       try {
-        const res = await fetch('/api/get-dashboard-data');
-        if (res.ok) {
-          const json = await res.json();
-          setData(json);
+        const json = await getDashboardData();
+        setData(json);
+        setError('');
+      } catch (caughtError) {
+        console.error('Failed to fetch dashboard data:', caughtError);
+        const message =
+          caughtError instanceof Error ? caughtError.message : 'Failed to fetch dashboard data.';
+        setError(message);
+        if (message.toLowerCase().includes('401') || message.toLowerCase().includes('not authenticated')) {
+          router.replace('/login');
         }
-      } catch (error) {
-        console.error("Failed to fetch dashboard data:", error);
       } finally {
         setLoading(false);
       }
@@ -28,9 +43,9 @@ export default function DashboardHome() {
     // Refresh every 30 seconds
     const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [authLoading, router]);
 
-  if (loading && !data) {
+  if ((authLoading || loading) && !data) {
     return (
       <div className="flex items-center justify-center h-full min-h-[60vh]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-hospital-500"></div>
@@ -59,7 +74,7 @@ export default function DashboardHome() {
     },
     { 
       name: 'Active Emergencies', 
-      value: data?.calls?.active_calls || 0, 
+      value: data?.active_calls || 0, 
       icon: ShieldAlert, 
       color: 'bg-rose-500',
       urgent: true
@@ -70,8 +85,14 @@ export default function DashboardHome() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Hospital AI Overview</h1>
-        <p className="text-slate-500 mt-1">Real-time metrics from the {data?.hospital || "Care Hospital"} AI voice agent.</p>
+        <p className="text-slate-500 mt-1">Real-time metrics from the Care Hospital AI voice agent.</p>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, i) => {
@@ -94,6 +115,7 @@ export default function DashboardHome() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          <VoiceCall />
           <CallStats data={data?.hourly_volume || []} intents={data?.intents || []} />
         </div>
         <div>
