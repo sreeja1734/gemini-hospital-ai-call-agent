@@ -3,7 +3,7 @@ API integration tests for the FastAPI routes.
 Tests authentication, system endpoints, and core call flow.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from backend.auth import create_access_token
 
 
 class TestSystemEndpoints:
@@ -42,6 +42,28 @@ class TestAuthEndpoints:
         assert data["token_type"] == "bearer"
         assert data["username"] == "admin"
         assert data["role"] == "admin"
+
+    @pytest.mark.asyncio
+    async def test_doctor_login_success(self, client):
+        response = await client.post("/auth/login", json={
+            "username": "doctor1",
+            "password": "doctor123"
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "doctor1"
+        assert data["role"] == "doctor"
+
+    @pytest.mark.asyncio
+    async def test_receptionist_login_success(self, client):
+        response = await client.post("/auth/login", json={
+            "username": "reception1",
+            "password": "recep123"
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "reception1"
+        assert data["role"] == "receptionist"
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, client):
@@ -95,6 +117,24 @@ class TestProtectedRoutes:
     async def test_emergency_alerts_requires_auth(self, client):
         response = await client.get("/emergency-alerts")
         assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_receptionist_cannot_view_emergency_alerts(self, client):
+        token = create_access_token(username="reception1", role="receptionist")
+        response = await client.get(
+            "/emergency-alerts",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_doctor_cannot_view_dashboard_analytics(self, client):
+        token = create_access_token(username="doctor1", role="doctor")
+        response = await client.get(
+            "/dashboard-data",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 403
 
 
 class TestCallEndpoints:

@@ -25,7 +25,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 def _get_gemini_client() -> genai.GenerativeModel:
     """Initialize a lightweight Gemini client for Vapi conversations."""
-    api_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
+    api_key = settings.GENAI_API_KEY
     genai.configure(api_key=api_key)
 
     # Use a fast but capable model; configurable via env if needed

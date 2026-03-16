@@ -4,7 +4,9 @@ Reads all secrets and config from environment variables.
 """
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-
+import os
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
 
 class Settings(BaseSettings):
     # App
@@ -15,11 +17,11 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Google / Gemini
-    GOOGLE_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""  # Optional alias; if set, use for new integrations
+    GOOGLE_API_KEY: str = ""   # type: ignore
+    GEMINI_API_KEY: str = ""  # type: ignore # Optional alias; if set, use for new integrations
     GOOGLE_CLOUD_PROJECT: str = ""
     GOOGLE_CLOUD_REGION: str = "us-central1"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL","gemini-2.5-flash")
     GEMINI_LIVE_MODEL: str = "gemini-2.0-flash-live-001"
 
     # Exotel
@@ -57,6 +59,11 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
 
+    @property
+    def GENAI_API_KEY(self) -> str:
+        """Prefer the dedicated Gemini/Generative AI key when provided."""
+        return self.GEMINI_API_KEY or self.GOOGLE_API_KEY
+
 
 @lru_cache()
 def get_settings() -> Settings:
@@ -64,3 +71,7 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+if settings.GENAI_API_KEY:
+    # ADK and google-genai look for GOOGLE_API_KEY in the environment.
+    os.environ["GOOGLE_API_KEY"] = settings.GENAI_API_KEY

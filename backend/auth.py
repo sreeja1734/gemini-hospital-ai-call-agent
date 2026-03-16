@@ -1,14 +1,14 @@
 """
 Authentication middleware using JWT tokens.
-Protects API endpoints with Bearer token authentication.
+Protects staff dashboard endpoints with Bearer token authentication.
 """
-import structlog
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
-from fastapi import HTTPException, Security, Depends, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+import structlog
+from fastapi import Depends, HTTPException, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
@@ -16,15 +16,11 @@ from .config import settings
 
 logger = structlog.get_logger()
 
-# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Bearer token security scheme
 security = HTTPBearer(auto_error=False)
 
-# JWT configuration
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 
 class TokenPayload(BaseModel):
@@ -56,17 +52,14 @@ def verify_token(token: str) -> TokenPayload:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
         return TokenPayload(**payload)
-    except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    except JWTError as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
 
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> UserInfo:
-    """
-    FastAPI dependency to extract and validate the current user from a JWT.
-    Returns a UserInfo if valid, raises 401 otherwise.
-    """
+    """Extract and validate the current staff user from a JWT."""
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token_data = verify_token(credentials.credentials)
@@ -76,10 +69,7 @@ async def get_current_user(
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> Optional[UserInfo]:
-    """
-    Like get_current_user, but returns None instead of raising if unauthenticated.
-    Useful for endpoints that work with or without auth.
-    """
+    """Return the authenticated user when present, otherwise None."""
     if credentials is None:
         return None
     try:
@@ -89,17 +79,18 @@ async def get_optional_user(
         return None
 
 
-def require_role(required_role: str):
+def require_role(roles: Sequence[str] | str):
     """
-    Dependency factory: returns a dependency that requires the user to have the specified role.
+    Dependency factory requiring the user to have one of the specified roles.
 
     Usage:
-        @router.get("/admin-only", dependencies=[Depends(require_role("admin"))])
+        @router.get("/admin-only", dependencies=[Depends(require_role(["admin"]))])
     """
-    async def role_checker(
-        user: UserInfo = Depends(get_current_user),
-    ) -> UserInfo:
-        if user.role != required_role and user.role != "admin":
+    allowed_roles = [roles] if isinstance(roles, str) else list(roles)
+
+    async def role_checker(user: UserInfo = Depends(get_current_user)) -> UserInfo:
+        if user.role not in allowed_roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
+
     return role_checker

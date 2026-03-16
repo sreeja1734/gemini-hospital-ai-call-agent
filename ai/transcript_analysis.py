@@ -52,9 +52,9 @@ async def analyze_transcript(call_id: str, transcript: str) -> dict:
         return _empty_analysis()
 
     try:
-        genai.configure(api_key=settings.GOOGLE_API_KEY)
+        genai.configure(api_key=settings.GENAI_API_KEY)
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name=settings.GEMINI_MODEL,
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
                 temperature=0.1  # Low temperature for structured output

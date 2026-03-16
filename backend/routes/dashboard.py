@@ -1,23 +1,29 @@
 """
 Dashboard analytics routes.
-Provides aggregated call, appointment, and emergency data for the admin UI.
+Provides aggregated call, appointment, and emergency data for staff dashboards.
 """
-import structlog
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
 from datetime import datetime, timedelta
 
-from database.connection import get_db
-from database.models import Call, Appointment, Transcript, Patient, CallStatus, RiskLevel
-from ..auth import get_current_user, UserInfo
+import structlog
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="", tags=["Dashboard"], dependencies=[Depends(get_current_user)])
+from database.connection import get_db
+from database.models import Appointment, Call, CallStatus, Transcript
+
+from ..auth import UserInfo, require_role
+
+router = APIRouter(prefix="", tags=["Dashboard"])
 logger = structlog.get_logger()
 
 
+@router.get("/dashboard-data")
 @router.get("/get-dashboard-data")
-async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
+async def get_dashboard_data(
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(require_role(["admin"])),
+):
     """
     Aggregated analytics for the admin dashboard.
     Returns call stats, appointment stats, and emergency summary.
@@ -27,7 +33,6 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = now - timedelta(days=7)
 
-        # ── Call statistics
         total_calls = await _count(db, Call)
         calls_today = await _count_where(db, Call, Call.started_at >= today_start)
         calls_this_week = await _count_where(db, Call, Call.started_at >= week_start)
@@ -36,18 +41,15 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
         emergency_calls = await _count_where(db, Call, Call.emergency_flag == True)
         completed_calls = await _count_where(db, Call, Call.status == CallStatus.COMPLETED)
 
-        # Average duration
         avg_duration_result = await db.execute(
             select(func.avg(Call.duration_seconds)).where(Call.duration_seconds != None)
         )
         avg_duration = avg_duration_result.scalar() or 0
 
-        # ── Appointment statistics
         total_appointments = await _count(db, Appointment)
-        appts_today = await _count_where(db, Appointment, Appointment.created_at >= today_start)
-        appts_this_week = await _count_where(db, Appointment, Appointment.created_at >= week_start)
+        appointments_today = await _count_where(db, Appointment, Appointment.created_at >= today_start)
+        appointments_this_week = await _count_where(db, Appointment, Appointment.created_at >= week_start)
 
-        # Doctor-wise appointment counts
         doctor_stats_result = await db.execute(
             select(Appointment.doctor_name, func.count(Appointment.id).label("count"))
             .group_by(Appointment.doctor_name)
@@ -59,7 +61,6 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
             for row in doctor_stats_result
         ]
 
-        # ── Intent breakdown
         intent_result = await db.execute(
             select(Call.intent, func.count(Call.id).label("count"))
             .where(Call.intent != None)
@@ -70,11 +71,10 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
             for row in intent_result
         ]
 
-        # ── Call volume by hour (last 24h)
         hourly_result = await db.execute(
             select(
                 func.date_trunc("hour", Call.started_at).label("hour"),
-                func.count(Call.id).label("count")
+                func.count(Call.id).label("count"),
             )
             .where(Call.started_at >= now - timedelta(hours=24))
             .group_by(func.date_trunc("hour", Call.started_at))
@@ -85,7 +85,6 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
             for row in hourly_result
         ]
 
-        # ── Recent emergency alerts
         emergency_result = await db.execute(
             select(Call)
             .where(Call.emergency_flag == True)
@@ -95,13 +94,13 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
         emergencies = emergency_result.scalars().all()
         emergency_alerts = [
             {
-                "call_id": str(c.id),
-                "phone": c.caller_phone,
-                "risk_level": c.risk_level.value if c.risk_level else "high",
-                "time": c.started_at.isoformat() if c.started_at else "",
-                "status": c.status.value if c.status else "unknown"
+                "call_id": str(call.id),
+                "phone": call.caller_phone,
+                "risk_level": call.risk_level.value if call.risk_level else "high",
+                "time": call.started_at.isoformat() if call.started_at else "",
+                "status": call.status.value if call.status else "unknown",
             }
-            for c in emergencies
+            for call in emergencies
         ]
 
         return {
@@ -114,30 +113,31 @@ async def get_dashboard_data(db: AsyncSession = Depends(get_db)):
                 "emergency": emergency_calls,
                 "completed": completed_calls,
                 "avg_duration_seconds": round(float(avg_duration), 1),
-                "ai_handle_rate": round(ai_handled / total_calls * 100, 1) if total_calls else 0
+                "ai_handle_rate": round(ai_handled / total_calls * 100, 1) if total_calls else 0,
             },
             "appointments": {
                 "total": total_appointments,
-                "today": appts_today,
-                "this_week": appts_this_week,
-                "by_doctor": doctor_stats
+                "today": appointments_today,
+                "this_week": appointments_this_week,
+                "by_doctor": doctor_stats,
             },
             "intents": intent_breakdown,
             "hourly_volume": hourly_volume,
             "emergency_alerts": emergency_alerts,
-            "active_calls": 0,  # From in-memory session manager
-            "generated_at": now.isoformat()
+            "active_calls": 0,
+            "generated_at": now.isoformat(),
         }
-
-    except Exception as e:
-        logger.error("Dashboard data fetch failed", error=str(e))
-        # Return demo data for hackathon presentation
+    except Exception as exc:
+        logger.error("Dashboard data fetch failed", error=str(exc))
         return _demo_dashboard_data()
 
 
 @router.get("/emergency-alerts")
-async def get_emergency_alerts(db: AsyncSession = Depends(get_db)):
-    """Get all high-priority emergency calls."""
+async def get_emergency_alerts(
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(require_role(["admin", "doctor"])),
+):
+    """Get all high-priority emergency calls for doctors and admins."""
     result = await db.execute(
         select(Call)
         .where(Call.emergency_flag == True)
@@ -148,21 +148,26 @@ async def get_emergency_alerts(db: AsyncSession = Depends(get_db)):
     return {
         "alerts": [
             {
-                "call_id": str(c.id),
-                "phone": c.caller_phone,
-                "risk_level": c.risk_level.value if c.risk_level else "high",
-                "time": c.started_at.isoformat() if c.started_at else "",
-                "status": c.status.value if c.status else "unknown",
-                "ai_handled": c.ai_handled
+                "call_id": str(call.id),
+                "phone": call.caller_phone,
+                "risk_level": call.risk_level.value if call.risk_level else "high",
+                "time": call.started_at.isoformat() if call.started_at else "",
+                "status": call.status.value if call.status else "unknown",
+                "ai_handled": call.ai_handled,
             }
-            for c in calls
+            for call in calls
         ]
     }
 
 
+@router.get("/calls/transcripts")
 @router.get("/transcripts")
-async def get_transcripts(limit: int = 20, db: AsyncSession = Depends(get_db)):
-    """Get recent transcripts with analysis for the dashboard."""
+async def get_transcripts(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(require_role(["admin", "doctor", "receptionist"])),
+):
+    """Get recent transcripts for staff users."""
     result = await db.execute(
         select(Transcript, Call)
         .join(Call, Transcript.call_id == Call.id)
@@ -173,20 +178,50 @@ async def get_transcripts(limit: int = 20, db: AsyncSession = Depends(get_db)):
     return {
         "transcripts": [
             {
-                "id": str(tr.id),
-                "call_id": str(tr.call_id),
+                "id": str(transcript.id),
+                "call_id": str(transcript.call_id),
                 "phone": call.caller_phone,
-                "content_preview": tr.content[:200] + "..." if len(tr.content) > 200 else tr.content,
-                "analysis": tr.analysis,
-                "turn_count": tr.turn_count,
-                "created_at": tr.created_at.isoformat() if tr.created_at else ""
+                "content_preview": transcript.content[:200] + "..."
+                if len(transcript.content) > 200
+                else transcript.content,
+                "analysis": transcript.analysis,
+                "turn_count": transcript.turn_count,
+                "created_at": transcript.created_at.isoformat() if transcript.created_at else "",
             }
-            for tr, call in rows
+            for transcript, call in rows
         ]
     }
 
 
-# Helpers
+@router.get("/dashboard/stream")
+async def dashboard_sse(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(require_role(["admin"])),
+):
+    """Server-sent events stream for real-time admin dashboard updates."""
+    import asyncio
+    import json as json_lib
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                data = await get_dashboard_data(db=db, user=user)
+                yield f"data: {json_lib.dumps(data)}\n\n"
+            except Exception:
+                yield f"data: {json_lib.dumps({'error': 'refresh failed'})}\n\n"
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 async def _count(db, model) -> int:
     result = await db.execute(select(func.count(model.id)))
     return result.scalar() or 0
@@ -201,69 +236,60 @@ async def _count_where(db, model, *conditions) -> int:
 
 
 def _demo_dashboard_data() -> dict:
-    """Return realistic demo data when DB is unavailable."""
-    from datetime import datetime
+    """Return realistic demo data when the dashboard query fails."""
     now = datetime.utcnow()
     return {
         "calls": {
-            "total": 142, "today": 18, "this_week": 87,
-            "ai_handled": 127, "escalated": 15, "emergency": 8,
-            "completed": 134, "avg_duration_seconds": 187.4,
-            "ai_handle_rate": 89.4
+            "total": 142,
+            "today": 18,
+            "this_week": 87,
+            "ai_handled": 127,
+            "escalated": 15,
+            "emergency": 8,
+            "completed": 134,
+            "avg_duration_seconds": 187.4,
+            "ai_handle_rate": 89.4,
         },
         "appointments": {
-            "total": 89, "today": 12, "this_week": 52,
+            "total": 89,
+            "today": 12,
+            "this_week": 52,
             "by_doctor": [
                 {"doctor": "Dr. Priya Kumar", "appointments": 28},
                 {"doctor": "Dr. Vikram Singh", "appointments": 22},
                 {"doctor": "Dr. Rahul Sharma", "appointments": 18},
                 {"doctor": "Dr. Ananya Iyer", "appointments": 13},
-                {"doctor": "Dr. Meena Nair", "appointments": 8}
-            ]
+                {"doctor": "Dr. Meena Nair", "appointments": 8},
+            ],
         },
         "intents": [
             {"intent": "appointment_booking", "count": 72},
             {"intent": "doctor_availability", "count": 31},
             {"intent": "general_inquiry", "count": 22},
             {"intent": "emergency", "count": 8},
-            {"intent": "hospital_timings", "count": 9}
+            {"intent": "hospital_timings", "count": 9},
         ],
         "hourly_volume": [
-            {"hour": f"{now.strftime('%Y-%m-%dT')}{h:02d}:00:00", "count": v}
-            for h, v in [(9,8),(10,12),(11,15),(12,9),(13,6),(14,11),(15,18),(16,14),(17,10),(18,7)]
+            {"hour": f"{now.strftime('%Y-%m-%dT')}{hour:02d}:00:00", "count": count}
+            for hour, count in [(9, 8), (10, 12), (11, 15), (12, 9), (13, 6), (14, 11), (15, 18), (16, 14), (17, 10), (18, 7)]
         ],
         "emergency_alerts": [
-            {"call_id": "demo-001", "phone": "+91-9876543210", "risk_level": "high",
-             "time": now.isoformat(), "status": "escalated"},
-            {"call_id": "demo-002", "phone": "+91-8765432109", "risk_level": "medium",
-             "time": now.isoformat(), "status": "completed"},
+            {
+                "call_id": "demo-001",
+                "phone": "+91-9876543210",
+                "risk_level": "high",
+                "time": now.isoformat(),
+                "status": "escalated",
+            },
+            {
+                "call_id": "demo-002",
+                "phone": "+91-8765432109",
+                "risk_level": "medium",
+                "time": now.isoformat(),
+                "status": "completed",
+            },
         ],
         "active_calls": 3,
         "generated_at": now.isoformat(),
-        "demo_mode": True
+        "demo_mode": True,
     }
-
-
-@router.get("/dashboard/stream")
-async def dashboard_sse(request: Request, db: AsyncSession = Depends(get_db)):
-    """Server-Sent Events stream for real-time dashboard updates."""
-    import asyncio
-    import json as _json
-    from fastapi.responses import StreamingResponse
-
-    async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                data = await get_dashboard_data(db)
-                yield f"data: {_json.dumps(data)}\n\n"
-            except Exception:
-                yield f"data: {_json.dumps({'error': 'refresh failed'})}\n\n"
-            await asyncio.sleep(5)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
