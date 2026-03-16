@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LoaderCircle, Mic, Phone, PhoneOff, Volume2 } from 'lucide-react';
+import { getUserSettings } from '@/lib/userSettings';
 
 type CallState = 'idle' | 'connecting' | 'listening' | 'ai-speaking';
 
@@ -38,6 +39,7 @@ export default function VoiceCall() {
   const [error, setError] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [language, setLanguage] = useState('en-US');
+  const [useBrowserSpeechFallback, setUseBrowserSpeechFallback] = useState(true);
 
   const wsRef = useRef<WebSocket | null>(null);
   const callIdRef = useRef('');
@@ -53,6 +55,10 @@ export default function VoiceCall() {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    const settings = getUserSettings();
+    setLanguage(settings.defaultLanguage);
+    setUseBrowserSpeechFallback(settings.useBrowserSpeechFallback);
+
     return () => {
       void stopCall();
     };
@@ -244,7 +250,7 @@ export default function VoiceCall() {
         audio.onerror = () => resolve();
         void audio.play().catch(() => resolve());
       });
-    } else if ('speechSynthesis' in window) {
+    } else if (useBrowserSpeechFallback && 'speechSynthesis' in window) {
       await new Promise<void>((resolve) => {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.onend = () => resolve();

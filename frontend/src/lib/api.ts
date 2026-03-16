@@ -71,6 +71,23 @@ export type Transcript = {
   created_at: string;
 };
 
+export type SystemInfo = {
+  service: string;
+  version: string;
+  docs: string;
+  health: string;
+  hospital: string;
+  supported_languages: string[];
+};
+
+export type HealthStatus = {
+  status: string;
+  service: string;
+  version: string;
+  active_calls: number;
+  database: string;
+};
+
 function getToken() {
   if (typeof window === "undefined") {
     return "";
@@ -142,4 +159,12 @@ export async function getTranscripts(limit = 50) {
   return apiFetch<{
     transcripts: Transcript[];
   }>(`/transcripts?limit=${limit}`);
+}
+
+export async function getSystemInfo() {
+  return apiFetch<SystemInfo>('/', { auth: false });
+}
+
+export async function getHealthStatus() {
+  return apiFetch<HealthStatus>('/health', { auth: false });
 }

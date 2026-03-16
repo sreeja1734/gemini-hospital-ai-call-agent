@@ -8,6 +8,7 @@ import EmergencyAlerts from '@/components/EmergencyAlerts';
 import VoiceCall from '@/components/VoiceCall';
 import { getDashboardData, type DashboardData } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
+import { getUserSettings } from '@/lib/userSettings';
 
 export default function DashboardHome() {
   const router = useRouter();
@@ -20,6 +21,8 @@ export default function DashboardHome() {
     if (authLoading) {
       return;
     }
+
+    const { dashboardRefreshSeconds } = getUserSettings();
 
     async function fetchDashboardData() {
       try {
@@ -40,8 +43,11 @@ export default function DashboardHome() {
     }
     
     fetchDashboardData();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchDashboardData, 30000);
+    if (dashboardRefreshSeconds <= 0) {
+      return;
+    }
+
+    const interval = setInterval(fetchDashboardData, dashboardRefreshSeconds * 1000);
     return () => clearInterval(interval);
   }, [authLoading, router]);
 

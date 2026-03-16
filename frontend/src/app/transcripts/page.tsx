@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import TranscriptViewer from '@/components/TranscriptViewer';
 import { getTranscripts, type Transcript } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
+import { getUserSettings } from '@/lib/userSettings';
 
 export default function TranscriptsPage() {
   const router = useRouter();
@@ -18,9 +19,11 @@ export default function TranscriptsPage() {
       return;
     }
 
+    const { transcriptFetchLimit } = getUserSettings();
+
     async function fetchTranscripts() {
       try {
-        const data = await getTranscripts(50);
+        const data = await getTranscripts(transcriptFetchLimit);
         setTranscripts(data.transcripts || []);
         setError('');
       } catch (caughtError) {
